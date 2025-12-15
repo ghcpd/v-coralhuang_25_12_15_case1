@@ -2,146 +2,152 @@
 
 You are given an existing Python script stored in **`input.py`**, which implements a baseline load test for a model or inference API by sending concurrent HTTP requests and measuring request latency.
 
-Your task is to produce an **enhanced performance testing and optimization solution**, along with clear, reproducible evidence demonstrating improvement.
+Your task is to produce an **enhanced performance testing and optimization solution** that demonstrates:
+
+* **Functional correctness of the testing framework**
+* **Measured performance improvement under load**
 
 **You must NOT modify `input.py`.**
-Instead, build your enhanced solution by creating **new code files** that either reuse `input.py` as-is or re-implement the baseline behavior separately, while preserving compatibility with the baseline approach.
+All enhancements must be implemented using **new code files**, while preserving compatibility with the baseline approach.
 
-The API endpoint used in `input.py` should be treated as a **placeholder inference endpoint** representing a model or API call.
+The API endpoint used in `input.py` should be treated as a **placeholder inference endpoint**.
 
 ---
 
-# **1. Existing Behavior (for context)**
+## 1. Existing Behavior (Context)
 
 `input.py` currently:
 
-* Sends concurrent HTTP POST requests to a placeholder inference API
-* Uses a fixed concurrency level and total request count
-* Measures end-to-end request latency per request
-* Writes request-level latency logs to a CSV file
-* Prints basic latency percentiles (P50, P95, P99) to stdout
+* Sends concurrent HTTP POST requests
+* Uses fixed concurrency and request count
+* Measures end-to-end latency per request
+* Writes request-level logs to CSV
+* Prints latency percentiles (P50 / P95 / P99)
 
-This baseline behavior represents the **pre-optimization (Before)** state.
-
----
-
-# **2. Required Enhancements**
-
-Your enhanced solution must address a performance degradation scenario where:
-
-* The service-level objective (SLA) requires **P95 latency ≤ 800 ms**
-* The observed baseline **P95 latency exceeds this threshold**
-
-You must improve the situation **without degrading output quality**.
+This represents the **pre-optimization (Before)** state.
 
 ---
 
-## **2.1 Baseline Preservation (Before)**
+## 2. Optimization Goal
 
-* Preserve the ability to run the original baseline test
-* Ensure that the “Before” measurements are reproducible
-* Use identical input payloads, request counts, and load characteristics for all comparisons
+A performance regression has been observed:
 
----
+* SLA requirement: **P95 latency ≤ 800 ms**
+* Baseline P95 latency exceeds this threshold
 
-## **2.2 Performance Analysis**
-
-* Analyze the baseline latency results produced by the existing code
-* Identify likely contributors to high latency (e.g. concurrency strategy, client behavior, request handling)
-* Base your analysis strictly on measured data, not assumptions
+Your solution must reduce latency **without degrading output quality**.
 
 ---
 
-## **2.3 Optimization Implementation**
+## 3. Required Work
 
-* Propose and implement at least one concrete optimization
+### 3.1 Baseline Preservation
 
-* Examples may include (but are not limited to):
+* Preserve baseline behavior and reproducibility
+* Use identical inputs, load parameters, and request semantics for all comparisons
+
+---
+
+### 3.2 Functional Verification (Correctness)
+
+You must include **functional verification tests** to ensure the testing framework itself is correct.
+
+At minimum, verify:
+
+* Request inputs are logically identical between Before and After runs
+* Per-request logs are generated and contain required fields
+* Percentile calculations are correct for known datasets
+* SLA gating is enforced correctly (pass/fail behavior)
+
+Functional tests **must be deterministic** and **must not depend on a live external service**.
+You may use a local stub or simulated service.
+
+---
+
+### 3.3 Performance Analysis
+
+* Analyze baseline latency results using measured data
+* Identify likely contributors to high latency
+* Do not rely on assumptions without evidence
+
+---
+
+### 3.4 Optimization Implementation
+
+* Implement at least one concrete optimization
+* Examples include (but are not limited to):
 
   * Improved concurrency or connection handling
-  * Client-side request batching (if applicable)
-  * More accurate latency measurement or aggregation
-  * Clear separation of baseline vs optimized test phases
+  * Client-side batching (if applicable)
+  * Clear separation of baseline vs optimized phases
 
-* Clearly explain **why** the chosen optimization should reduce latency
-
----
-
-## **2.4 Post-Optimization Test (After)**
-
-* Run the same test scenario after applying your optimization
-* Ensure test conditions are identical to the baseline
-* Collect request-level latency logs for the optimized version
+Explain **why** the optimization should reduce latency.
 
 ---
 
-## **2.5 Timing Comparison**
+### 3.5 Post-Optimization Performance Test
 
-You must produce a clear **Before vs After comparison**, including at least:
+* Re-run the same load test after optimization
+* Conditions must match the baseline
+* Collect request-level latency logs
 
-* P50 latency
-* P95 latency
-* P99 latency
+---
+
+### 3.6 Timing Comparison
+
+Produce a **Before vs After comparison** including:
+
+* P50 / P95 / P99 latency
 * Total request count
-* Successful vs failed requests (if applicable)
+* Successful vs failed requests
 
-The comparison must be based on **real measured data produced by the test code**.
-
----
-
-# **3. Output Requirements**
-
-Your final answer must include **two deliverables**:
+Results must be based on **real measured data**.
 
 ---
 
-## **3.1 Enhanced Implementation (New Code Only)**
+## 4. Output Requirements
 
-Provide a new implementation (one or more new files) that:
+### 4.1 Enhanced Implementation (New Code Only)
 
-* Does **not** modify `input.py`
-* Preserves baseline testing capability (either by invoking `input.py` or reproducing its baseline behavior in a new module)
-* Implements the optimization logic
-* Produces request-level latency logs for both Before and After
-* Enables a clear Before/After comparison
+Your solution must:
 
-**Mandatory requirement:**
-You must provide an executable script named **`run_tests`** (exact name) that serves as the single entry point for running the full workflow. The internal logic may be split across multiple files, but `run_tests` must:
+* Leave `input.py` unchanged
+* Include functional verification tests
+* Include performance tests (Before + After)
+* Produce machine-readable logs and comparison output
 
-* Execute both **Before** and **After** tests
-* Generate logs and a machine-readable timing comparison output (CSV or JSON)
-* Exit with a non-zero status code if the SLA is not met after optimization (P95 > 800 ms)
+You must provide an executable script named **`run_tests`** that:
 
-The `run_tests` script may be a shell script or a Python executable (without extension), as long as it can be executed directly.
-
----
-
-## **3.2 Documentation (`README`)**
-
-Provide a `README` (markdown preferred) that clearly explains:
-
-* Overview of the performance problem and optimization approach
-* Environment setup (dependencies, Python version, installation steps)
-* How to run the full test workflow using `run_tests`
-* Description of generated outputs (logs, comparison results)
-* Interpretation of the timing comparison
-* Explicit statement of whether the SLA (P95 ≤ 800 ms) is met after optimization
-* Any assumptions or limitations
-
-The documentation must enable a reviewer to reproduce the results in a clean environment.
+* Runs functional verification tests
+* Runs performance tests
+* Generates comparison artifacts (CSV or JSON)
+* Exits non-zero if the SLA is not met after optimization
 
 ---
 
-# **4. Constraints**
+### 4.2 Documentation (`README`)
 
-* The API endpoint is a placeholder and may be adapted if necessary
-* Test inputs and load parameters must remain consistent across runs
-* Do not artificially reduce output size or quality to achieve latency improvements
-* All conclusions must be supported by logs or measured data
+Provide a README that explains:
+
+* Optimization approach
+* Environment setup
+* How to run `run_tests`
+* Interpretation of results
+* Whether the SLA is met
+* Assumptions or limitations
 
 ---
 
-# **5. Final Deliverables**
+## 5. Constraints
 
-1. **Enhanced performance testing implementation (new code)** including an executable **`run_tests`** entry-point
-2. **README documentation** describing setup, execution, and results
+* The API endpoint is a placeholder
+* Test conditions must remain consistent
+* Do not reduce output quality to achieve latency gains
+* All conclusions must be supported by data
+
+---
+
+## 6. Final Deliverables
+
+1. **Enhanced testing implementation (new code)** with executable `run_tests`
+2. **README documentation**
