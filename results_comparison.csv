@@ -1,0 +1,6 @@
+metric,baseline,optimized
+total_requests,400,400
+successful_requests,400,400
+p50_ms,1234.85,732.27
+p95_ms,1278.94,756.27
+p99_ms,1749.77,1243.63
