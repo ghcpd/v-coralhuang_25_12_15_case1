@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+import os
+import sys
+import signal
+import shutil
+import json
+import csv
+import urllib.request
+
+ROOT = os.path.dirname(__file__)
+LOGS_DIR = os.path.join(ROOT, "logs")
+RESULTS_DIR = os.path.join(ROOT, "results")
+
+INPUT_PY = os.path.join(ROOT, "input.py")
+SERVER_PY = os.path.join(ROOT, "server_stub.py")
+
+TOTAL_REQUESTS = 400
+SLA_P95_MS = 800
+
+os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+
+def start_server(mode, port=8000, seed=123):
+    log_file = os.path.join(LOGS_DIR, f"requests_{mode}.jsonl")
+    cmd = [sys.executable, SERVER_PY, "--mode", mode, "--port", str(port), "--seed", str(seed), "--log-file", log_file]
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return proc, log_file
+
+
+def stop_server(proc):
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+
+
+def wait_for_health(port=8000, timeout=10.0):
+    deadline = time.time() + timeout
+    url = f"http://127.0.0.1:{port}/health"
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            time.sleep(0.1)
+    return False
+
+
+def run_baseline_and_capture(mode):
+    proc, log_file = start_server(mode)
+    try:
+        ok = wait_for_health()
+        if not ok:
+            print("Server failed to start")
+            stop_server(proc)
+            sys.exit(2)
+
+        # Run input.py which writes latency_baseline.csv
+        print(f"Running baseline client against server mode={mode} ...")
+        r = subprocess.run([sys.executable, INPUT_PY], cwd=ROOT)
+        if r.returncode != 0:
+            print("input.py failed")
+            stop_server(proc)
+            sys.exit(3)
+
+        # Move CSV into results dir with mode name
+        src = os.path.join(ROOT, "latency_baseline.csv")
+        if not os.path.exists(src):
+            print("Expected output CSV not found")
+            stop_server(proc)
+            sys.exit(4)
+        dest = os.path.join(RESULTS_DIR, f"{mode}_latency.csv")
+        shutil.move(src, dest)
+
+        # copy log file
+        if os.path.exists(log_file):
+            shutil.copy(log_file, os.path.join(RESULTS_DIR, os.path.basename(log_file)))
+
+        return dest, os.path.join(RESULTS_DIR, os.path.basename(log_file))
+    finally:
+        stop_server(proc)
+
+
+def read_latencies(csv_path):
+    latencies = []
+    successes = 0
+    total = 0
+    rows = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            total += 1
+            try:
+                lat = float(r["latency_ms"])
+            except Exception:
+                lat = None
+            rows.append(r)
+            if r["status_code"] == '200' or r["status_code"] == 200:
+                successes += 1
+                if lat is not None:
+                    latencies.append(lat)
+    return latencies, total, successes, rows
+
+
+def percentile(values, p):
+    if not values:
+        return None
+    values = sorted(values)
+    index = int(len(values) * p)
+    return values[min(index, len(values) - 1)]
+
+
+def compare_results(before_csv, after_csv, before_log, after_log):
+    b_lats, b_total, b_success, b_rows = read_latencies(before_csv)
+    a_lats, a_total, a_success, a_rows = read_latencies(after_csv)
+
+    summary = {
+        "before": {
+            "p50": percentile(b_lats, 0.50),
+            "p95": percentile(b_lats, 0.95),
+            "p99": percentile(b_lats, 0.99),
+            "total": b_total,
+            "success": b_success,
+        },
+        "after": {
+            "p50": percentile(a_lats, 0.50),
+            "p95": percentile(a_lats, 0.95),
+            "p99": percentile(a_lats, 0.99),
+            "total": a_total,
+            "success": a_success,
+        }
+    }
+
+    # Verify per-request inputs identical
+    def read_bodies(log_path):
+        bodies = []
+        with open(log_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    j = json.loads(line)
+                    bodies.append(j.get("body"))
+                except Exception:
+                    pass
+        return bodies
+
+    b_bodies = read_bodies(before_log)
+    a_bodies = read_bodies(after_log)
+
+    # Compare bodies up to the minimum number of logged requests to allow for some failed calls
+    min_len = min(len(b_bodies), len(a_bodies))
+    inputs_identical = True
+    for i in range(min_len):
+        if b_bodies[i] != a_bodies[i]:
+            inputs_identical = False
+            break
+
+    return summary, inputs_identical
+
+
+def run_functional_checks(before_csv, after_csv, before_log, after_log):
+    print("Running functional checks...")
+    # Percentile correctness
+    data = [1, 2, 3, 4, 5]
+    assert percentile(data, 0.5) == 3
+    assert percentile(data, 0.95) == 5
+
+    # CSV fields presence
+    with open(before_csv, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        expected = ["request_id", "timestamp_ms", "latency_ms", "status_code"]
+        assert all(field in reader.fieldnames for field in expected)
+
+    # Request inputs identical
+    _, inputs_identical = compare_results(before_csv, after_csv, before_log, after_log)
+    assert inputs_identical
+
+    print("Functional checks passed.")
+
+
+if __name__ == "__main__":
+    # Baseline run
+    before_csv, before_log = run_baseline_and_capture("baseline")
+    # Optimized run
+    after_csv, after_log = run_baseline_and_capture("optimized")
+
+    # Analyze
+    summary, inputs_identical = compare_results(before_csv, after_csv, before_log, after_log)
+
+    # Write comparison artifact
+    with open(os.path.join(RESULTS_DIR, "comparison.json"), "w", encoding="utf-8") as f:
+        json.dump({"summary": summary, "inputs_identical": inputs_identical}, f, indent=2)
+
+    print("=== Summary ===")
+    print(json.dumps(summary, indent=2))
+    print(f"Inputs identical between runs: {inputs_identical}")
+
+    # Run pytest-based unit tests (deterministic). Exit on failure.
+    print("Running pytest suite...")
+    r_pytest = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests"], cwd=ROOT)
+    if r_pytest.returncode != 0:
+        print("Pytest suite FAILED.")
+        sys.exit(8)
+
+    # Run functional checks
+    try:
+        run_functional_checks(before_csv, after_csv, before_log, after_log)
+    except AssertionError as e:
+        print("Functional checks FAILED.")
+        sys.exit(5)
+
+    # Enforce SLA
+    after_p95 = summary["after"]["p95"]
+    if after_p95 is None:
+        print("No successful requests after optimization to evaluate SLA")
+        sys.exit(6)
+
+    if after_p95 <= SLA_P95_MS:
+        print(f"SLA met: after P95 = {after_p95} ms <= {SLA_P95_MS} ms")
+        sys.exit(0)
+    else:
+        print(f"SLA NOT met: after P95 = {after_p95} ms > {SLA_P95_MS} ms")
+        sys.exit(7)
