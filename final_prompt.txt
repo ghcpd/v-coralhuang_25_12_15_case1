@@ -1,0 +1,31 @@
+## Performance Optimization Task
+
+You are given an existing Python script stored in **`input.py`**, which implements a baseline load test for a model or inference API by sending concurrent HTTP requests and measuring request latency.
+
+Your task is to produce an **enhanced performance testing and optimization solution** that demonstrates:
+
+* **Functional correctness of the testing framework**
+* **Measured performance improvement under load, obtained by actually executing the tests**
+
+**You must NOT modify `input.py`.**
+All enhancements must be implemented using **new code files**, while preserving compatibility with the baseline approach.
+
+The API endpoint used in `input.py` should be treated as a **placeholder inference endpoint**.
+
+---
+
+## 1. Existing Behavior (Context)
+
+`input.py` currently:
+
+* Sends concurrent HTTP POST requests
+* Uses fixed concurrency and request count
+* Measures end-to-end latency per request
+* Writes request-level logs to CSV
+* Prints latency percentiles (P50 / P95 / P99)
+
+This represents the **pre-optimization (Before)** state.
+
+---
+
+## 2. Optimization Goal
