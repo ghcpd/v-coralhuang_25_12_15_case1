@@ -1,0 +1,17 @@
+{
+  "baseline": {
+    "total_requests": 400,
+    "successful_requests": 400,
+    "p50": 1234.85,
+    "p95": 1278.94,
+    "p99": 1749.77
+  },
+  "optimized": {
+    "total_requests": 400,
+    "successful_requests": 400,
+    "p50": 732.27,
+    "p95": 756.27,
+    "p99": 1243.63
+  },
+  "sla_p95_ms": 800.0
+}
