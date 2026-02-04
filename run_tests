@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+import subprocess
+import time
+import os
+import shutil
+import sys
+import json
+from tools import read_latency_csv, percentile, write_json
+
+BASELINE_ARTIFACTS = "baseline_payloads.json"
+OPTIMIZED_ARTIFACTS = "optimized_payloads.json"
+BASELINE_RESULTS = "baseline_results.csv"
+OPTIMIZED_RESULTS = "optimized_results.csv"
+SUMMARY_JSON = "compare_results.json"
+SLA_MS = 800.0
+
+
+def start_server(mode, artifacts, port=8000):
+    cmd = [sys.executable, "server_stub.py", "--mode", mode, "--port", str(port), "--artifacts", artifacts]
+    proc = subprocess.Popen(cmd)
+    time.sleep(0.8)
+    return proc
+
+
+def run_load_runner(output=None):
+    args = [sys.executable, "load_runner.py"]
+    if output:
+        args += ["--output", output]
+    r = subprocess.run(args, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("load_runner.py failed:")
+        print(r.stdout)
+        print(r.stderr)
+    return r.returncode
+
+
+def move_result(dst):
+    src = "latency_baseline.csv"
+    if not os.path.exists(src):
+        raise SystemExit(f"Expected {src} not found")
+    shutil.move(src, dst)
+
+
+def analyze_and_save(baseline_csv, optimized_csv):
+    b = read_latency_csv(baseline_csv)
+    o = read_latency_csv(optimized_csv)
+
+    summary = {
+        "baseline": {
+            "p50": percentile(b["latencies"], 0.50),
+            "p95": percentile(b["latencies"], 0.95),
+            "p99": percentile(b["latencies"], 0.99),
+            "total": len(b["rows"]),
+            "successful": sum(1 for s in b["statuses"] if s == 200)
+        },
+        "optimized": {
+            "p50": percentile(o["latencies"], 0.50),
+            "p95": percentile(o["latencies"], 0.95),
+            "p99": percentile(o["latencies"], 0.99),
+            "total": len(o["rows"]),
+            "successful": sum(1 for s in o["statuses"] if s == 200)
+        }
+    }
+    write_json(SUMMARY_JSON, summary)
+    return summary
+
+
+def run_pytest():
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q"], text=True)
+    return r.returncode
+
+
+def main():
+    # Ensure dependencies available
+    print("Installing dependencies from requirements.txt if needed...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], stdout=subprocess.DEVNULL)
+
+    # Run functional tests first (fast ones)
+    print("Running functional tests...")
+    rc = run_pytest()
+    if rc != 0:
+        print("Functional tests failed")
+        sys.exit(rc)
+
+    # Baseline run
+    print("Starting baseline server...")
+    p = start_server("baseline", BASELINE_ARTIFACTS)
+    try:
+        print("Running baseline load test (this may take a while)...")
+        rc = run_load_runner(output=BASELINE_RESULTS)
+        if rc != 0:
+            p.terminate(); p.wait()
+            sys.exit(rc)
+    finally:
+        p.terminate(); p.wait()
+
+    # Optimized run
+    print("Starting optimized server...")
+    p2 = start_server("optimized", OPTIMIZED_ARTIFACTS)
+    try:
+        print("Running optimized load test (client-side optimization: connection pooling)...")
+        rc = subprocess.run([sys.executable, "optimized_runner.py", "--output", OPTIMIZED_RESULTS], capture_output=True, text=True).returncode
+        if rc != 0:
+            p2.terminate(); p2.wait()
+            sys.exit(rc)
+    finally:
+        p2.terminate(); p2.wait()
+
+    # Analyze
+    print("Analyzing results...")
+    summary = analyze_and_save(BASELINE_RESULTS, OPTIMIZED_RESULTS)
+    print(json.dumps(summary, indent=2))
+
+    sla_met = summary["optimized"]["p95"] is not None and summary["optimized"]["p95"] <= SLA_MS
+    if sla_met:
+        print("✅ SLA met after optimization")
+        sys.exit(0)
+    else:
+        print("❌ SLA NOT met after optimization")
+        sys.exit(2)
+
+if __name__ == "__main__":
+    main()
